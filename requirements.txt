@@ -1,0 +1,6 @@
+aiogram==3.*
+playwright==1.*
+beautifulsoup4==4.*
+python-dotenv==1.*
+
+

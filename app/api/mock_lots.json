@@ -1,0 +1,83 @@
+{
+  "count": 6,
+  "items": [
+    {
+      "id": 1001,
+      "lot_number": 1,
+      "name_ru": "Поставка одноразовых медицинских масок",
+      "description_ru": "Медицинские одноразовые маски, трехслойные, нестерильные",
+      "amount": 12500000,
+      "count": 500000,
+      "customer_bin": "990140002345",
+      "disable_person_id": 0,
+      "psd_sign": 0,
+      "consulting_services": 0,
+      "ref_lot_status_id": 1
+    },
+    {
+      "id": 1002,
+      "lot_number": 2,
+      "name_ru": "Поставка одноразовых защитных халатов",
+      "description_ru": "Халаты медицинские одноразовые, размер универсальный",
+      "amount": 8400000,
+      "count": 12000,
+      "customer_bin": "010340001122",
+      "disable_person_id": 0,
+      "psd_sign": 0,
+      "consulting_services": 0,
+      "ref_lot_status_id": 1
+    },
+    {
+      "id": 1003,
+      "lot_number": 3,
+      "name_ru": "Закупка средств индивидуальной защиты для сотрудников",
+      "description_ru": "СИЗ: перчатки, маски, защитные очки",
+      "amount": 15600000,
+      "count": 1,
+      "customer_bin": "020740009988",
+      "disable_person_id": 1,
+      "psd_sign": 0,
+      "consulting_services": 0,
+      "ref_lot_status_id": 1
+    },
+    {
+      "id": 1004,
+      "lot_number": 4,
+      "name_ru": "Поставка влажных салфеток без содержания спирта",
+      "description_ru": "Влажные салфетки, без спирта, гипоаллергенные",
+      "amount": 3200000,
+      "count": 80000,
+      "customer_bin": "950240007654",
+      "disable_person_id": 0,
+      "psd_sign": 0,
+      "consulting_services": 0,
+      "ref_lot_status_id": 1
+    },
+    {
+      "id": 1005,
+      "lot_number": 5,
+      "name_ru": "Строительно-монтажные работы (2 категория сложности)",
+      "description_ru": "Ремонт и строительные работы объектов социальной инфраструктуры",
+      "amount": 185000000,
+      "count": 1,
+      "customer_bin": "080640003333",
+      "disable_person_id": 0,
+      "psd_sign": 1,
+      "consulting_services": 0,
+      "ref_lot_status_id": 1
+    },
+    {
+      "id": 1006,
+      "lot_number": 6,
+      "name_ru": "Поставка одноразовых перчаток и СИЗ для инвалидных организаций",
+      "description_ru": "СИЗ для организаций инвалидов, поставка партиями",
+      "amount": 6100000,
+      "count": 30000,
+      "customer_bin": "030540006666",
+      "disable_person_id": 1,
+      "psd_sign": 0,
+      "consulting_services": 0,
+      "ref_lot_status_id": 1
+    }
+  ]
+}
