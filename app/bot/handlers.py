@@ -39,7 +39,6 @@ async def start_handler(message: Message):
 @router.message(Command("subscribe"))
 async def subscribe_handler(message: Message):
     chat_id = message.chat.id
-
     chats = load_chats()
     chats.add(chat_id)
     save_chats(chats)
@@ -50,7 +49,6 @@ async def subscribe_handler(message: Message):
 @router.callback_query(lambda c: c.data == "subscribe")
 async def subscribe_callback(callback: CallbackQuery):
     chat_id = callback.message.chat.id
-
     chats = load_chats()
     chats.add(chat_id)
     save_chats(chats)
@@ -77,8 +75,8 @@ async def show_lots_callback(callback: CallbackQuery):
 async def send_lots(message: Message):
     lots = await get_lots()
 
+    # ❗ НЕ ПИШЕМ ОШИБКУ ПОЛЬЗОВАТЕЛЮ
     if not lots:
-        await message.answer("⚠️ Сейчас не удалось получить лоты.")
         return
 
     filtered = filter_lots(lots)
@@ -86,9 +84,10 @@ async def send_lots(message: Message):
     sent_ids = load_sent_lots()
     new_sent_ids = set(sent_ids)
 
+    # 🔑 используем URL как уникальный ключ
     filtered = [
         lot for lot in filtered
-        if lot.get("id") and int(lot["id"]) not in sent_ids
+        if lot.get("url") and lot["url"] not in sent_ids
     ]
 
     if not filtered:
@@ -98,29 +97,22 @@ async def send_lots(message: Message):
     await message.answer(f"🔎 Найдено новых лотов: {len(filtered)}")
 
     for lot in filtered:
-        try:
-            lot_id = int(lot["id"])
-        except (KeyError, TypeError, ValueError):
+        lot_url = lot.get("url")
+        if not lot_url:
             continue
 
-        lot_number = lot.get("lot_number", "—")
-        portal_url = f"https://goszakup.gov.kz/ru/registry/show/{lot_id}"
-
         text = (
-            f"📦 <b>Лот №{lot_number}</b>\n"
+            f"📦 <b>{lot.get('lot_number', '—')}</b>\n"
             f"<b>{lot.get('name_ru', 'Без названия')}</b>\n\n"
-            f"🆔 <b>ID:</b> <code>{lot_id}</code>\n"
-            f"💰 <b>{lot.get('amount', 0):,} ₸</b>\n\n"
-            f"📝 {lot.get('description_ru', 'Описание отсутствует')}"
+            f"💰 <b>{lot.get('amount', '—')}</b>\n"
+            f"📌 Статус: <b>{lot.get('status_ru', '—')}</b>"
         )
 
         keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[[
-                InlineKeyboardButton(
-                    text="🔗 Открыть лот на портале",
-                    url=portal_url
-                )
-            ]]
+            inline_keyboard=[[InlineKeyboardButton(
+                text="🔗 Открыть лот на портале",
+                url=lot_url
+            )]]
         )
 
         await message.answer(
@@ -130,6 +122,6 @@ async def send_lots(message: Message):
             disable_web_page_preview=True,
         )
 
-        new_sent_ids.add(lot_id)
+        new_sent_ids.add(lot_url)
 
     save_sent_lots(new_sent_ids)
