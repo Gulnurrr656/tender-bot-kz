@@ -1,31 +1,29 @@
-from playwright.async_api import async_playwright
+# app/api/client.py
+
+from __future__ import annotations
+
+import asyncio
+from typing import List, Dict, Set
+
 from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError
 
 SEARCH_URL = "https://goszakup.gov.kz/ru/search/lots"
 
-# Базовый keyword (на всякий)
 KEYWORD = "куртка"
 
-# ✅ Расширенный список для поиска
 SEARCH_KEYWORDS = [
-    # одежда / одноразка
     "халат",
     "маска",
     "перчатки",
     "бахилы",
     "комбинезон",
     "форма",
-
-    # закупки / поставки
     "поставка",
     "приобретение",
-
-    # работы / услуги
     "ремонт",
     "монтаж",
     "обслуживание",
-
-    # IT
     "сайт",
     "портал",
     "информационная система",
@@ -33,49 +31,15 @@ SEARCH_KEYWORDS = [
     "техническая поддержка",
 ]
 
+# ⛔ ЖЁСТКОЕ ограничение: один Chromium за раз
+_BROWSER_SEMAPHORE = asyncio.Semaphore(1)
 
-async def get_lots_by_keyword(keyword: str = KEYWORD) -> list[dict]:
-    """
-    ⛔ ВРЕМЕННО НЕ ИСПОЛЬЗУЕТСЯ
-    (оставляем как есть, НЕ ЛОМАЕМ)
-    """
-    lots: list[dict] = []
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-
-        await page.goto(SEARCH_URL, timeout=60000)
-
-        await page.wait_for_selector(
-            'input[placeholder*="Наименование"]',
-            state="attached",
-            timeout=60000
-        )
-
-        await page.fill(
-            'input[placeholder*="Наименование"]',
-            keyword
-        )
-
-        await page.click('button:has-text("Найти")')
-
-        await page.wait_for_load_state("networkidle")
-
-        await page.wait_for_selector(
-            "table tbody tr",
-            state="attached",
-            timeout=60000
-        )
-
-        html = await page.content()
-        await browser.close()
-
+def _parse_lots(html: str) -> List[Dict]:
     soup = BeautifulSoup(html, "html.parser")
     rows = soup.select("table tbody tr")
 
-    print(f"🔎 '{keyword}': HTML строк найдено: {len(rows)}")
-
+    lots: List[Dict] = []
     for row in rows:
         cols = row.find_all("td")
         if len(cols) < 7:
@@ -95,22 +59,103 @@ async def get_lots_by_keyword(keyword: str = KEYWORD) -> list[dict]:
     return lots
 
 
-# ==========================================================
-# ⛔ ВАЖНО: ВРЕМЕННО ГЛУШИМ Playwright
-# ==========================================================
+async def get_lots() -> List[Dict]:
+    """
+    СТАБИЛЬНЫЙ клиент:
+    - один Chromium
+    - один context
+    - один page
+    - последовательный прогон keywords
+    """
+    async with _BROWSER_SEMAPHORE:
+        print("🚀 Playwright: старт браузера")
 
-async def get_lots() -> list[dict]:
-    """
-    ⚠️ Playwright ВРЕМЕННО ОТКЛЮЧЁН
-    Нужно ТОЛЬКО для проверки кнопок и логики бота
-    """
-    print("⚠️ Playwright временно отключён (debug mode)")
-    return []
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                ],
+            )
+
+            context = await browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (X11; Linux x86_64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/122.0.0.0 Safari/537.36"
+                )
+            )
+
+            page = await context.new_page()
+
+            all_lots: List[Dict] = []
+            seen: Set[str] = set()
+
+            try:
+                for kw in SEARCH_KEYWORDS:
+                    print(f"🔎 Поиск keyword='{kw}'")
+
+                    try:
+                        await page.goto(
+                            SEARCH_URL,
+                            wait_until="domcontentloaded",
+                            timeout=60000,
+                        )
+
+                        await page.wait_for_selector(
+                            'input[placeholder*="Наименование"]',
+                            timeout=60000,
+                        )
+
+                        await page.fill(
+                            'input[placeholder*="Наименование"]',
+                            kw,
+                        )
+
+                        await page.click('button:has-text("Найти")')
+
+                        # ждём именно строки
+                        await page.wait_for_selector(
+                            "table tbody tr",
+                            timeout=60000,
+                        )
+
+                        html = await page.content()
+                        lots = _parse_lots(html)
+
+                        print(f"   → найдено строк: {len(lots)}")
+
+                        for lot in lots:
+                            url = lot.get("url")
+                            if not url or url in seen:
+                                continue
+                            seen.add(url)
+                            all_lots.append(lot)
+
+                        # 🔴 обязательная пауза
+                        await asyncio.sleep(1.2)
+
+                    except PWTimeoutError as e:
+                        print(f"⏱️ Timeout keyword='{kw}': {e}")
+                    except Exception as e:
+                        print(f"❌ Ошибка keyword='{kw}': {repr(e)}")
+
+            finally:
+                await page.close()
+                await context.close()
+                await browser.close()
+                print("🧹 Playwright: браузер закрыт")
+
+            print(f"📦 Всего уникальных лотов: {len(all_lots)}")
+            return all_lots
 
 
 # 🧪 локальный тест
 if __name__ == "__main__":
     import asyncio
-
-    result = asyncio.run(get_lots())
-    print("Лотов получено:", len(result))
+    res = asyncio.run(get_lots())
+    print("Лотов:", len(res))
+    for r in res[:5]:
+        print(r)

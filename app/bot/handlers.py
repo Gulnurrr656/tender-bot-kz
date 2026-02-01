@@ -50,23 +50,27 @@ async def safe_send(message: Message, text: str, reply_markup=None):
             await asyncio.sleep(3)
 
 
+def main_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="📦 Показать лоты", callback_data="show_lots")],
+            [InlineKeyboardButton(text="🔔 Включить авто-поиск", callback_data="subscribe")],
+            [InlineKeyboardButton(text="♻️ Сбросить просмотр", callback_data="reset_seen")],
+        ]
+    )
+
+
 # ───────────────────────── START ─────────────────────────
 
 @router.message(Command("start"))
 async def start_handler(message: Message):
-    keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="📦 Показать лоты", callback_data="show_lots:0")],
-            [InlineKeyboardButton(text="🔔 Включить авто-поиск", callback_data="subscribe")],
-        ]
-    )
-
     await safe_send(
         message,
         "👋 Привет!\n\n"
         "Я тендер-бот 🤖\n"
-        "Показываю подходящие и актуальные лоты.",
-        reply_markup=keyboard,
+        "Показываю подходящие и актуальные лоты.\n\n"
+        "Нажми «📦 Показать лоты» — пришлю по 10 штук, без повторов.",
+        reply_markup=main_keyboard(),
     )
 
 
@@ -79,31 +83,62 @@ async def subscribe_callback(callback: CallbackQuery):
     chats.add(chat_id)
     save_chats(chats)
 
-    await callback.answer()
-    await safe_send(callback.message, "🔔 Авто-поиск включён для этого чата")
+    await callback.answer("✅ Включено")
+    await safe_send(callback.message, "🔔 Авто-поиск включён для этого чата", reply_markup=main_keyboard())
+
+
+# ───────────────────────── RESET SEEN ─────────────────────────
+
+@router.callback_query(lambda c: c.data == "reset_seen")
+async def reset_seen_callback(callback: CallbackQuery):
+    chat_id = str(callback.message.chat.id)
+
+    user_seen = load_user_seen()
+    user_seen[chat_id] = set()
+    save_user_seen(user_seen)
+
+    await callback.answer("Сброшено")
+    await safe_send(callback.message, "♻️ История просмотренных лотов сброшена. Теперь снова покажу лоты.", reply_markup=main_keyboard())
 
 
 # ───────────────────────── LOTS ─────────────────────────
 
-@router.callback_query(lambda c: c.data.startswith("show_lots"))
+@router.callback_query(lambda c: c.data == "show_lots")
 async def show_lots_callback(callback: CallbackQuery):
-    _, offset = callback.data.split(":")
-    await callback.answer()
-    await send_lots(callback.message, int(offset))
+    # чтобы было видно что бот “думает”
+    await callback.answer("🔎 Ищу лоты...")
+    await send_lots(callback.message)
 
 
 # ───────────────────────── CORE LOGIC ─────────────────────────
 
-async def send_lots(message: Message, offset: int):
+async def send_lots(message: Message):
     chat_id = str(message.chat.id)
 
-    lots = await get_lots()
-    if not lots:
-        await safe_send(message, "❌ Лоты не найдены.")
+    # 1) Забираем лоты (и показываем реальную ошибку, если Playwright упал)
+    try:
+        lots = await get_lots()
+    except Exception as e:
+        await safe_send(
+            message,
+            "❌ Ошибка при получении лотов.\n\n"
+            f"<b>Причина:</b> {type(e).__name__}: {e}",
+            reply_markup=main_keyboard(),
+        )
         return
 
+    if not lots:
+        await safe_send(
+            message,
+            "❌ Лоты не найдены (get_lots вернул пусто).",
+            reply_markup=main_keyboard(),
+        )
+        return
+
+    # 2) Фильтруем
     filtered = filter_lots(lots)
 
+    # 3) Не повторяем для конкретного пользователя
     user_seen = load_user_seen()
     seen = user_seen.get(chat_id, set())
 
@@ -113,13 +148,28 @@ async def send_lots(message: Message, offset: int):
     ]
 
     if not available:
-        await safe_send(message, "❌ Новых подходящих лотов нет.")
+        await safe_send(
+            message,
+            "❌ Новых подходящих лотов нет.",
+            reply_markup=main_keyboard(),
+        )
         return
 
-    page = available[offset: offset + PAGE_SIZE]
+    # ✅ ВАЖНО: pagination без offset.
+    # Каждый раз выдаём следующие 10 НЕВИДЕННЫХ, потом помечаем их seen.
+    page = available[:PAGE_SIZE]
+
+    # можно показать сколько осталось
+    await safe_send(
+        message,
+        f"🔎 Найдено новых лотов: <b>{len(available)}</b>\n"
+        f"Показываю <b>{len(page)}</b> шт.",
+        reply_markup=None,
+    )
 
     for lot in page:
         url = lot["url"]
+
         text = (
             f"📦 <b>{lot.get('lot_number', '—')}</b>\n"
             f"<b>{lot.get('name_ru', 'Без названия')}</b>\n\n"
@@ -140,11 +190,14 @@ async def send_lots(message: Message, offset: int):
     user_seen[chat_id] = seen
     save_user_seen(user_seen)
 
-    if offset + PAGE_SIZE < len(available):
+    # 4) Кнопка “Показать ещё” — опять show_lots (без offset), чтобы НЕ ПУТАЛОСЬ
+    if len(available) > PAGE_SIZE:
         more_keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(
-                text="➡️ Показать ещё",
-                callback_data=f"show_lots:{offset + PAGE_SIZE}"
-            )]]
+            inline_keyboard=[
+                [InlineKeyboardButton(text="➡️ Показать ещё 10", callback_data="show_lots")],
+                [InlineKeyboardButton(text="♻️ Сбросить просмотр", callback_data="reset_seen")],
+            ]
         )
-        await safe_send(message, "Показать ещё лоты?", reply_markup=more_keyboard)
+        await safe_send(message, "Продолжить?", reply_markup=more_keyboard)
+    else:
+        await safe_send(message, "✅ Это все новые лоты на сейчас.", reply_markup=main_keyboard())

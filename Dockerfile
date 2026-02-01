@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# системные зависимости для Playwright
+# Системные зависимости для Chromium
 RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     libnss3 \
