@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# 1. Системные библиотеки для Playwright / Chromium
+# системные зависимости для Playwright
 RUN apt-get update && apt-get install -y \
     libglib2.0-0 \
     libnss3 \
@@ -23,18 +23,13 @@ RUN apt-get update && apt-get install -y \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Рабочая папка
 WORKDIR /app
 
-# 3. Python-зависимости
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 4. Playwright + Chromium (КРИТИЧНО)
 RUN python -m playwright install chromium
 
-# 5. Код
 COPY . .
 
-# 6. Запуск бота
 CMD ["python", "-m", "app.main"]
