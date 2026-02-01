@@ -1,5 +1,3 @@
-# app/api/client.py
-
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 
@@ -38,8 +36,8 @@ SEARCH_KEYWORDS = [
 
 async def get_lots_by_keyword(keyword: str = KEYWORD) -> list[dict]:
     """
-    ✅ ТВОЯ СТАРАЯ get_lots, просто переименована.
-    Логика НЕ ломается.
+    ⛔ ВРЕМЕННО НЕ ИСПОЛЬЗУЕТСЯ
+    (оставляем как есть, НЕ ЛОМАЕМ)
     """
     lots: list[dict] = []
 
@@ -47,36 +45,29 @@ async def get_lots_by_keyword(keyword: str = KEYWORD) -> list[dict]:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
 
-        # 1️⃣ Открываем страницу
         await page.goto(SEARCH_URL, timeout=60000)
 
-        # 2️⃣ Ждём поле поиска
         await page.wait_for_selector(
             'input[placeholder*="Наименование"]',
             state="attached",
             timeout=60000
         )
 
-        # 3️⃣ Вводим ключевое слово
         await page.fill(
             'input[placeholder*="Наименование"]',
             keyword
         )
 
-        # 4️⃣ Нажимаем кнопку "Найти"
         await page.click('button:has-text("Найти")')
 
-        # ✅ 5️⃣ Ждём окончания XHR / JS
         await page.wait_for_load_state("networkidle")
 
-        # ✅ 6️⃣ Ждём строки (DOM attached, не visible)
         await page.wait_for_selector(
             "table tbody tr",
             state="attached",
             timeout=60000
         )
 
-        # 7️⃣ Забираем HTML
         html = await page.content()
         await browser.close()
 
@@ -104,32 +95,17 @@ async def get_lots_by_keyword(keyword: str = KEYWORD) -> list[dict]:
     return lots
 
 
+# ==========================================================
+# ⛔ ВАЖНО: ВРЕМЕННО ГЛУШИМ Playwright
+# ==========================================================
+
 async def get_lots() -> list[dict]:
     """
-    ✅ Новая безопасная обёртка:
-    - прогоняет несколько ключей
-    - объединяет результаты
-    - убирает дубли по url
+    ⚠️ Playwright ВРЕМЕННО ОТКЛЮЧЁН
+    Нужно ТОЛЬКО для проверки кнопок и логики бота
     """
-    all_lots: list[dict] = []
-    seen: set[str] = set()
-
-    for kw in SEARCH_KEYWORDS:
-        try:
-            lots = await get_lots_by_keyword(kw)
-        except Exception as e:
-            print(f"⚠️ Ошибка поиска по '{kw}': {e}")
-            continue
-
-        for lot in lots:
-            key = lot.get("url") or f'{lot.get("lot_number")}|{lot.get("name_ru")}'
-            if key in seen:
-                continue
-            seen.add(key)
-            all_lots.append(lot)
-
-    print(f"📦 Всего лотов после объединения: {len(all_lots)}")
-    return all_lots
+    print("⚠️ Playwright временно отключён (debug mode)")
+    return []
 
 
 # 🧪 локальный тест
@@ -138,5 +114,3 @@ if __name__ == "__main__":
 
     result = asyncio.run(get_lots())
     print("Лотов получено:", len(result))
-    for r in result[:5]:
-        print(r)
