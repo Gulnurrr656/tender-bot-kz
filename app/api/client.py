@@ -1,16 +1,11 @@
-# app/api/client.py
-
 from __future__ import annotations
 
 import asyncio
 from typing import List, Dict, Set
 
-from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright, TimeoutError as PWTimeoutError
+from playwright.async_api import async_playwright
 
 SEARCH_URL = "https://goszakup.gov.kz/ru/search/lots"
-
-KEYWORD = "куртка"
 
 SEARCH_KEYWORDS = [
     "халат",
@@ -31,41 +26,26 @@ SEARCH_KEYWORDS = [
     "техническая поддержка",
 ]
 
-# ⛔ ЖЁСТКОЕ ограничение: один Chromium за раз
 _BROWSER_SEMAPHORE = asyncio.Semaphore(1)
 
 
-def _parse_lots(html: str) -> List[Dict]:
-    soup = BeautifulSoup(html, "html.parser")
-    rows = soup.select("table tbody tr")
-
-    lots: List[Dict] = []
-    for row in rows:
-        cols = row.find_all("td")
-        if len(cols) < 7:
-            continue
-
-        link_tag = cols[1].find("a")
-        link = link_tag["href"] if link_tag else ""
-
-        lots.append({
-            "lot_number": cols[0].get_text(strip=True),
-            "name_ru": cols[1].get_text(strip=True),
-            "amount": cols[4].get_text(strip=True),
-            "status_ru": cols[6].get_text(strip=True),
-            "url": f"https://goszakup.gov.kz{link}" if link else "",
-        })
-
-    return lots
+def _normalize_lot(item: Dict) -> Dict:
+    """
+    Приводим API-лот к формату,
+    который уже ждёт твой бот.
+    """
+    return {
+        "lot_number": str(item.get("lotNumber", "—")),
+        "name_ru": item.get("nameRu") or item.get("nameKz") or "Без названия",
+        "amount": item.get("amount", "—"),
+        "status_ru": item.get("statusRu", "—"),
+        "url": f"https://goszakup.gov.kz/ru/announce/index/{item.get('announceId')}",
+    }
 
 
 async def get_lots() -> List[Dict]:
     """
-    СТАБИЛЬНЫЙ клиент:
-    - один Chromium
-    - один context
-    - один page
-    - последовательный прогон keywords
+    СТАБИЛЬНЫЙ клиент через XHR API goszakup.gov.kz
     """
     async with _BROWSER_SEMAPHORE:
         print("🚀 Playwright: старт браузера")
@@ -90,57 +70,51 @@ async def get_lots() -> List[Dict]:
 
             page = await context.new_page()
 
-            all_lots: List[Dict] = []
+            collected: List[Dict] = []
             seen: Set[str] = set()
+
+            async def on_response(response):
+                if "/v3/lots/search" in response.url and response.request.method == "POST":
+                    try:
+                        data = await response.json()
+                        items = data.get("items") or []
+                        print(f"📥 API items: {len(items)}")
+
+                        for item in items:
+                            lot = _normalize_lot(item)
+                            url = lot.get("url")
+                            if url and url not in seen:
+                                seen.add(url)
+                                collected.append(lot)
+                    except Exception as e:
+                        print("❌ Ошибка чтения API:", e)
+
+            page.on("response", on_response)
 
             try:
                 for kw in SEARCH_KEYWORDS:
                     print(f"🔎 Поиск keyword='{kw}'")
 
-                    try:
-                        await page.goto(
-                            SEARCH_URL,
-                            wait_until="domcontentloaded",
-                            timeout=60000,
-                        )
+                    await page.goto(
+                        SEARCH_URL,
+                        wait_until="domcontentloaded",
+                        timeout=60000,
+                    )
 
-                        await page.wait_for_selector(
-                            'input[placeholder*="Наименование"]',
-                            timeout=60000,
-                        )
+                    await page.wait_for_selector(
+                        'input[placeholder*="Наименование"]',
+                        timeout=60000,
+                    )
 
-                        await page.fill(
-                            'input[placeholder*="Наименование"]',
-                            kw,
-                        )
+                    await page.fill(
+                        'input[placeholder*="Наименование"]',
+                        kw,
+                    )
 
-                        await page.click('button:has-text("Найти")')
+                    await page.click('button:has-text("Найти")')
 
-                        # ждём именно строки
-                        await page.wait_for_selector(
-                            "table tbody tr",
-                            timeout=60000,
-                        )
-
-                        html = await page.content()
-                        lots = _parse_lots(html)
-
-                        print(f"   → найдено строк: {len(lots)}")
-
-                        for lot in lots:
-                            url = lot.get("url")
-                            if not url or url in seen:
-                                continue
-                            seen.add(url)
-                            all_lots.append(lot)
-
-                        # 🔴 обязательная пауза
-                        await asyncio.sleep(1.2)
-
-                    except PWTimeoutError as e:
-                        print(f"⏱️ Timeout keyword='{kw}': {e}")
-                    except Exception as e:
-                        print(f"❌ Ошибка keyword='{kw}': {repr(e)}")
+                    # даём SPA время сходить в API
+                    await asyncio.sleep(5)
 
             finally:
                 await page.close()
@@ -148,13 +122,14 @@ async def get_lots() -> List[Dict]:
                 await browser.close()
                 print("🧹 Playwright: браузер закрыт")
 
-            print(f"📦 Всего уникальных лотов: {len(all_lots)}")
-            return all_lots
+            print(f"📦 Всего уникальных лотов: {len(collected)}")
+            return collected
 
 
-# 🧪 локальный тест
+# локальный тест
 if __name__ == "__main__":
     import asyncio
+
     res = asyncio.run(get_lots())
     print("Лотов:", len(res))
     for r in res[:5]:
