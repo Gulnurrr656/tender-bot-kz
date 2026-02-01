@@ -12,7 +12,10 @@ from aiogram.exceptions import TelegramRetryAfter, TelegramNetworkError
 
 from app.api.client import get_lots
 from app.services.lot_filter import filter_lots
-from app.services.sent_lots import load_sent_lots, save_sent_lots
+from app.services.sent_lots import (
+    load_user_seen,
+    save_user_seen,
+)
 from app.services.chats import load_chats, save_chats
 
 router = Router()
@@ -41,11 +44,9 @@ async def safe_send(message: Message, text: str, reply_markup=None):
 
         except TelegramRetryAfter as e:
             wait_s = int(getattr(e, "retry_after", 5))
-            print(f"⚠️ Flood control: жду {wait_s} сек...")
             await asyncio.sleep(wait_s + 1)
 
-        except TelegramNetworkError as e:
-            print("⚠️ TelegramNetworkError:", e)
+        except TelegramNetworkError:
             await asyncio.sleep(3)
 
 
@@ -55,7 +56,7 @@ async def safe_send(message: Message, text: str, reply_markup=None):
 async def start_handler(message: Message):
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="📦 Показать лоты", callback_data="show_lots")],
+            [InlineKeyboardButton(text="📦 Показать лоты", callback_data="show_lots:0")],
             [InlineKeyboardButton(text="🔔 Включить авто-поиск", callback_data="subscribe")],
         ]
     )
@@ -71,16 +72,6 @@ async def start_handler(message: Message):
 
 # ───────────────────────── SUBSCRIBE ─────────────────────────
 
-@router.message(Command("subscribe"))
-async def subscribe_handler(message: Message):
-    chat_id = message.chat.id
-    chats = load_chats()
-    chats.add(chat_id)
-    save_chats(chats)
-
-    await safe_send(message, "🔔 Авто-поиск включён для этого чата")
-
-
 @router.callback_query(lambda c: c.data == "subscribe")
 async def subscribe_callback(callback: CallbackQuery):
     chat_id = callback.message.chat.id
@@ -94,52 +85,41 @@ async def subscribe_callback(callback: CallbackQuery):
 
 # ───────────────────────── LOTS ─────────────────────────
 
-@router.message(Command("lots"))
-async def lots_handler(message: Message):
-    await send_lots(message, offset=0)
-
-
-@router.callback_query(lambda c: c.data == "show_lots")
+@router.callback_query(lambda c: c.data.startswith("show_lots"))
 async def show_lots_callback(callback: CallbackQuery):
-    await callback.answer("🔎 Ищу лоты...")
-    await send_lots(callback.message, offset=0)
-
-
-@router.callback_query(lambda c: c.data.startswith("more:"))
-async def more_lots_callback(callback: CallbackQuery):
-    offset = int(callback.data.split(":")[1])
+    _, offset = callback.data.split(":")
     await callback.answer()
-    await send_lots(callback.message, offset=offset)
+    await send_lots(callback.message, int(offset))
 
 
 # ───────────────────────── CORE LOGIC ─────────────────────────
 
-async def send_lots(message: Message, offset: int = 0):
+async def send_lots(message: Message, offset: int):
+    chat_id = str(message.chat.id)
+
     lots = await get_lots()
     if not lots:
+        await safe_send(message, "❌ Лоты не найдены.")
         return
 
     filtered = filter_lots(lots)
 
-    sent_ids = load_sent_lots()
-    new_sent_ids = set(sent_ids)
+    user_seen = load_user_seen()
+    seen = user_seen.get(chat_id, set())
 
-    filtered = [
+    available = [
         lot for lot in filtered
-        if lot.get("url") and lot["url"] not in sent_ids
+        if lot.get("url") and lot["url"] not in seen
     ]
 
-    if not filtered:
+    if not available:
         await safe_send(message, "❌ Новых подходящих лотов нет.")
         return
 
-    page = filtered[offset: offset + PAGE_SIZE]
+    page = available[offset: offset + PAGE_SIZE]
 
     for lot in page:
-        lot_url = lot.get("url")
-        if not lot_url:
-            continue
-
+        url = lot["url"]
         text = (
             f"📦 <b>{lot.get('lot_number', '—')}</b>\n"
             f"<b>{lot.get('name_ru', 'Без названия')}</b>\n\n"
@@ -150,20 +130,21 @@ async def send_lots(message: Message, offset: int = 0):
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(
                 text="🔗 Открыть лот на портале",
-                url=lot_url
+                url=url
             )]]
         )
 
         await safe_send(message, text, reply_markup=keyboard)
-        new_sent_ids.add(lot_url)
+        seen.add(url)
 
-    save_sent_lots(new_sent_ids)
+    user_seen[chat_id] = seen
+    save_user_seen(user_seen)
 
-    if offset + PAGE_SIZE < len(filtered):
+    if offset + PAGE_SIZE < len(available):
         more_keyboard = InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(
                 text="➡️ Показать ещё",
-                callback_data=f"more:{offset + PAGE_SIZE}"
+                callback_data=f"show_lots:{offset + PAGE_SIZE}"
             )]]
         )
         await safe_send(message, "Показать ещё лоты?", reply_markup=more_keyboard)
