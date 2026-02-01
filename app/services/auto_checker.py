@@ -1,5 +1,3 @@
-# app/services/auto_checker.py
-
 import asyncio
 
 from aiogram.exceptions import TelegramRetryAfter, TelegramNetworkError
@@ -9,15 +7,14 @@ from app.services.lot_filter import filter_lots
 from app.services.sent_lots import load_sent_lots, save_sent_lots
 from app.services.chats import load_chats
 
-CHECK_INTERVAL = 300  # 5 минут
-
-SEND_DELAY = 1.2      # пауза между сообщениями (сек)
-MAX_PER_RUN = 15      # максимум новых лотов за один проход (чтобы не словить Flood)
+CHECK_INTERVAL = 300   # 5 минут
+SEND_DELAY = 1.2       # пауза между сообщениями
+MAX_PER_RUN = 10       # максимум лотов за один цикл (безопасно)
 
 
 async def safe_send(bot, chat_id: int, text: str):
     """
-    Безопасная отправка: учитывает Flood control и сетевые ошибки.
+    Безопасная отправка сообщения с учётом Flood control.
     """
     while True:
         try:
@@ -32,7 +29,7 @@ async def safe_send(bot, chat_id: int, text: str):
 
         except TelegramRetryAfter as e:
             wait_s = int(getattr(e, "retry_after", 5))
-            print(f"⚠️ Flood control: жду {wait_s} сек...")
+            print(f"⚠️ Flood control: жду {wait_s} сек")
             await asyncio.sleep(wait_s + 1)
 
         except TelegramNetworkError as e:
@@ -41,6 +38,10 @@ async def safe_send(bot, chat_id: int, text: str):
 
 
 async def auto_check_lots(bot):
+    """
+    Фоновый авто-поиск новых лотов.
+    Работает тихо и безопасно.
+    """
     while True:
         try:
             chats = load_chats()
@@ -66,15 +67,14 @@ async def auto_check_lots(bot):
                 if lot_key not in sent_ids:
                     new_lots.append(lot)
 
-            # ✅ ограничим объём отправки за один прогон
-            if new_lots:
-                new_lots = new_lots[:MAX_PER_RUN]
+            # ограничиваем объём
+            new_lots = new_lots[:MAX_PER_RUN]
 
             for lot in new_lots:
                 lot_key = lot.get("url") or lot.get("lot_number")
 
                 text = (
-                    f"🆕 <b>НОВЫЙ ЛОТ</b>\n\n"
+                    f"🆕 <b>Новый лот</b>\n\n"
                     f"<b>{lot.get('name_ru', 'Без названия')}</b>\n"
                     f"💰 <b>{lot.get('amount', '—')}</b>\n"
                     f"📌 Статус: <b>{lot.get('status_ru', '—')}</b>\n\n"
