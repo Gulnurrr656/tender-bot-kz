@@ -26,14 +26,14 @@ RUN apt-get update && apt-get install -y \
 # 2. Рабочая папка
 WORKDIR /app
 
-# 3. Устанавливаем Python-зависимости
+# 3. Python-зависимости
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 4. Ставим Playwright + Chromium
+# 4. Playwright + Chromium (КРИТИЧНО)
 RUN python -m playwright install chromium
 
-# 5. Копируем код
+# 5. Код
 COPY . .
 
 # 6. Запуск бота
